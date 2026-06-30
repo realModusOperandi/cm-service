@@ -9,8 +9,7 @@ services:
       - '5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql
-  app:
-    container_name: app
+  cmserviceapp:
     build:
       context: .
       dockerfile: Dockerfile
