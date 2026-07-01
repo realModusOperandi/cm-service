@@ -1,24 +1,33 @@
 package org.example.cmservice.auth.web
 
+import com.jayway.jsonpath.JsonPath
 import org.example.cmservice.IntegrationTestBase
+import org.example.cmservice.auth.domain.User
 import org.example.cmservice.auth.repository.UserRepository
+import org.example.cmservice.auth.service.JwtTokenService
+import org.example.cmservice.auth.web.dto.AuthRequest
 import org.example.cmservice.auth.web.dto.UserRequest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.assertNotNull
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.MediaType
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import tools.jackson.databind.ObjectMapper
+import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class AuthControllerIntegrationTest @Autowired constructor(
     val userRepository: UserRepository,
     val mvc: MockMvc,
-    val objectMapper: ObjectMapper
+    val objectMapper: ObjectMapper,
+    val passwordEncoder: PasswordEncoder,
+    val jwtTokenService: JwtTokenService,
 ) : IntegrationTestBase() {
     companion object {
         const val USERNAME_REQUIRED = "Username is required"
@@ -29,7 +38,6 @@ class AuthControllerIntegrationTest @Autowired constructor(
 
     @AfterEach
     fun tearDown() {
-        println("Deleting ${userRepository.findAll()}")
         userRepository.deleteAll()
     }
 
@@ -171,6 +179,113 @@ class AuthControllerIntegrationTest @Autowired constructor(
         )
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.rawPassword").value(PASSWORD_REQUIRED))
+
+        assertEquals(0, userRepository.findAll().count())
+    }
+
+    @Test
+    fun `POST user login successful`() {
+        val rawPassword = "password"
+        val user = userRepository.save(
+            User(
+                username = "test 1",
+                email = "test1@email.com",
+                passwordHash = passwordEncoder.encode(rawPassword)!!
+            )
+        )
+        val authRequest = AuthRequest(user.username, rawPassword)
+
+        println(user.id)
+
+        val result = mvc.perform(
+            post("/api/auth/login")
+                .content(objectMapper.writeValueAsString(authRequest))
+                .contentType(MediaType.APPLICATION_JSON)
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.username").value(user.username))
+            .andExpect(jsonPath("$.token").isNotEmpty)
+            .andExpect(jsonPath("$.expiresAt").isNumber)
+            .andReturn()
+
+        val response = result.response.contentAsString
+        val token = JsonPath.read<String>(response, "$.token")
+        val decoded = jwtTokenService.decoder.decode(token)
+        assertEquals(user.username, decoded.subject)
+
+        val expiresAtMillis = JsonPath.read<Long>(response, "$.expiresAt")
+        val now = Instant.now().toEpochMilli()
+        assertTrue(expiresAtMillis > now, "expiresAt should be in the future")
+        val diffSeconds = (expiresAtMillis - now) / 1000
+        assertTrue(
+            diffSeconds in 3590..3610,
+            "expiresAt should be about 3600 seconds in the future (was $diffSeconds)"
+        )
+    }
+
+    @Test
+    fun `POST user login fails wrong password`() {
+        val rawPassword = "password"
+        val user = userRepository.save(User(username = "test 1", email = "test1@email.com", passwordHash = passwordEncoder.encode(rawPassword)!!))
+        val authRequest = AuthRequest(user.username, "wrong")
+
+        mvc.perform(
+            post("/api/auth/login")
+                .content(objectMapper.writeValueAsString(authRequest))
+                .contentType(MediaType.APPLICATION_JSON)
+        )
+            .andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun `POST user login fails wrong username`() {
+        val rawPassword = "password"
+        val user = userRepository.save(User(username = "test 1", email = "test1@email.com", passwordHash = passwordEncoder.encode(rawPassword)!!))
+        val authRequest = AuthRequest("wrong", "wrong")
+
+        mvc.perform(
+            post("/api/auth/login")
+                .content(objectMapper.writeValueAsString(authRequest))
+                .contentType(MediaType.APPLICATION_JSON)
+        )
+            .andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun `POST user login null username`() {
+        val user = """
+            {
+                "password": "pass"
+            }
+        """.trimIndent()
+
+        mvc.perform(
+            post("/api/auth/login")
+                .content(user)
+                .contentType(MediaType.APPLICATION_JSON)
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.username").value(org.example.cmservice.auth.web.AuthControllerIntegrationTest.Companion.USERNAME_REQUIRED))
+
+        assertEquals(0, userRepository.findAll().count())
+    }
+
+    @Test
+    fun `POST user login null password`() {
+        val user = """
+            {
+                "username": "test"
+            }
+        """.trimIndent()
+
+        val result = mvc.perform(
+            post("/api/auth/login")
+                .content(user)
+                .contentType(MediaType.APPLICATION_JSON)
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.password").value(org.example.cmservice.auth.web.AuthControllerIntegrationTest.Companion.PASSWORD_REQUIRED))
+
 
         assertEquals(0, userRepository.findAll().count())
     }
