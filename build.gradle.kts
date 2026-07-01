@@ -4,6 +4,7 @@ plugins {
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
     kotlin("plugin.jpa") version "2.4.0"
+    kotlin("kapt") version "2.4.0"
 }
 
 group = "org.example"
@@ -33,6 +34,9 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springframework.kafka:spring-kafka")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
+    implementation("org.mapstruct:mapstruct:1.6.3")
+
+    kapt("org.mapstruct:mapstruct-processor:1.6.3")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     developmentOnly("org.springframework.boot:spring-boot-docker-compose")
