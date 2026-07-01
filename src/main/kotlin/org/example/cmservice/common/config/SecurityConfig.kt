@@ -10,6 +10,9 @@ import org.springframework.core.convert.converter.Converter
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.security.authentication.AbstractAuthenticationToken
+import org.springframework.security.authentication.AuthenticationManager
+import org.springframework.security.authentication.ProviderManager
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
@@ -65,6 +68,13 @@ class SecurityConfig(
             }
 
         return http.build()
+    }
+
+    @Bean
+    fun authManager(userDetailsService: UserDetailsService, passwordEncoder: PasswordEncoder): AuthenticationManager {
+        val authProvider = DaoAuthenticationProvider(userDetailsService)
+        authProvider.setPasswordEncoder(passwordEncoder)
+        return ProviderManager(authProvider)
     }
 
     @Bean

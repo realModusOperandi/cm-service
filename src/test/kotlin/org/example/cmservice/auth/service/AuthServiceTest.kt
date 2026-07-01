@@ -1,23 +1,28 @@
 package org.example.cmservice.auth.service
 
-import io.mockk.every
+import io.mockk.*
 import io.mockk.impl.annotations.MockK
 import io.mockk.junit5.MockKExtension
-import io.mockk.verifySequence
 import org.example.cmservice.auth.domain.User
 import org.example.cmservice.auth.mapper.UserMapper
 import org.example.cmservice.auth.repository.UserRepository
+import org.example.cmservice.auth.service.dto.AuthDTO
 import org.example.cmservice.auth.service.dto.UserDTO
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.security.authentication.AuthenticationManager
+import org.springframework.security.authentication.BadCredentialsException
+import org.springframework.security.core.Authentication
 import org.springframework.security.crypto.password.PasswordEncoder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 @ExtendWith(MockKExtension::class)
 class AuthServiceTest {
+    @MockK lateinit var authenticationManager: AuthenticationManager
+    @MockK lateinit var jwtTokenService: JwtTokenService
     @MockK lateinit var userRepository: UserRepository
     @MockK lateinit var passwordEncoder: PasswordEncoder
     @MockK lateinit var userMapper: UserMapper
@@ -26,7 +31,7 @@ class AuthServiceTest {
 
     @BeforeEach
     fun setup() {
-        authService = AuthService(userRepository, userMapper, passwordEncoder)
+        authService = AuthService(userRepository, userMapper, passwordEncoder, jwtTokenService, authenticationManager)
     }
 
     @Test
@@ -69,5 +74,45 @@ class AuthServiceTest {
         assertThrows<DataIntegrityViolationException> {
             authService.registerUser(userDto, rawPassword)
         }
+    }
+
+    @Test
+    fun `authenticate returns token and expiration on success`() {
+        val authRequest = AuthDTO("user1", "password123")
+        val authentication = mockk<Authentication>()
+        val jwt = "jwt-token"
+        val expiresAt = 1730000000000L
+
+        every { authenticationManager.authenticate(any()) } returns authentication
+        every { authentication.name } returns "user1"
+        every { jwtTokenService.generateToken(authentication) } returns jwt
+        every { jwtTokenService.extractExpirationTime(jwt) } returns expiresAt
+
+        val response = authService.authenticate(authRequest)
+
+        assertEquals(jwt, response.token)
+        assertEquals("user1", response.username)
+        assertEquals(expiresAt, response.expiresAt)
+
+        verify {
+            authenticationManager.authenticate(
+                match { it.principal == "user1" && it.credentials == "password123" }
+            )
+            jwtTokenService.generateToken(authentication)
+            jwtTokenService.extractExpirationTime(jwt)
+        }
+    }
+
+    @Test
+    fun `authenticate throws when authentication fails`() {
+        val authRequest = AuthDTO("user1", "wrongpass")
+        every { authenticationManager.authenticate(any()) } throws BadCredentialsException("Invalid")
+
+        assertThrows<BadCredentialsException> {
+            authService.authenticate(authRequest)
+        }
+
+        verify { authenticationManager.authenticate(any()) }
+        confirmVerified(jwtTokenService)
     }
 }
